@@ -1,4 +1,5 @@
-/* -----------------------------------------------------------------------------
+/*  ESTE CODIGO FUE CAMBIADO PARA USAR TICKER.h EN VEZ DE FLEXITIMER2.h
+ *  -----------------------------------------------------------------------------
   - Project: Remote control Crawling robot
   - Author:  panerqiang@sunfounder.com
   - Date:  2015/1/27
@@ -25,7 +26,9 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include <Servo.h>    //to define and control servos
-#include <FlexiTimer2.h>//to set a timer to manage all servos
+//#include <FlexiTimer2.h>//to set a timer to manage all servos
+#include <Ticker.h> // Sustituto a FlexiTimer
+Ticker servoTicker;
 /* Servos --------------------------------------------------------------------*/
 //define 12 servos for 4 legs
 Servo servo[4][3];
@@ -90,9 +93,12 @@ void setup()
       site_now[i][j] = site_expect[i][j];
     }
   }
-  //start servo service
-  FlexiTimer2::set(20, servo_service);
-  FlexiTimer2::start();
+  
+//start servo service
+//  FlexiTimer2::set(20, servo_service);
+//  FlexiTimer2::start();
+servoTicker.attach_ms(20, servo_service); //Sustituto a FlexiTimer
+
   Serial.println("Servo service started");
   //initialize servos
   servo_attach();
@@ -147,7 +153,7 @@ void loop()
   Serial.println("Hand wave");
   hand_wave(3);
   delay(2000);
-  Serial.println("Hand shake");
+  Serial.println("Hand wave");
   hand_shake(3);
   delay(2000);  
   Serial.println("Body dance");

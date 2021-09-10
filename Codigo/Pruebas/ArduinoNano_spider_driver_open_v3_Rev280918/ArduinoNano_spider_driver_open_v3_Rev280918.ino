@@ -1,7 +1,14 @@
 /* -----------------------------------------------------------------------------
-  - Project: Remote control Crawling robot
-  - Author:  panerqiang@sunfounder.com
+  - Original Project: Body Movement Crawling robot
+  - Original Author:  panerqiang@sunfounder.com
   - Date:  2015/1/27
+
+  - Remix Project by Wilmar
+  - Date: 2018/09/25
+  - Change log: 
+      > Add more movement and combine demo and controlled move in one
+      > Using PCA9685 16 channel Servo controller for Arduino for motor driver
+      > Add NodeMCU for Wifi Controller as AP
    -----------------------------------------------------------------------------
   - Overview
   - This project was written for the Crawling robot desigened by Sunfounder.
@@ -19,18 +26,21 @@
     3.measure real sites and set to real_site[4][3], make and run
     4.comment VERIFY, make and run
   The document describes in detail how to operate.
-   ---------------------------------------------------------------------------*/
-
-// modified by Regis for spider project, 2015/09/11
 
 /* Includes ------------------------------------------------------------------*/
-#include <Servo.h>    //to define and control servos
+
+#include <Adafruit_PWMServoDriver.h>
 #include <FlexiTimer2.h>//to set a timer to manage all servos
+#include <SerialCommand.h>
+SerialCommand SCmd;   // The demo SerialCommand object
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
+
 /* Servos --------------------------------------------------------------------*/
 //define 12 servos for 4 legs
-Servo servo[4][3];
+
+//Servo servo[4][3];
 //define servos' ports
-const int servo_pin[4][3] = { {2, 3, 4}, {5, 6, 7}, {8, 9, 10}, {11, 12, 13} };
+const int servo_pin[4][3] = { {0, 1, 2}, {4, 5, 6}, {8, 9, 10}, {12, 13, 14} };
 /* Size of the robot ---------------------------------------------------------*/
 const float length_a = 55;
 const float length_b = 77.5;
@@ -46,7 +56,7 @@ const float y_default = x_default;
 volatile float site_now[4][3];    //real-time coordinates of the end of each leg
 volatile float site_expect[4][3]; //expected coordinates of the end of each leg
 float temp_speed[4][3];   //each axis' speed, needs to be recalculated before each movement
-float move_speed;     //movement speed
+float move_speed =1.4;     //movement speed
 float speed_multiple = 1; //movement speed multiple
 const float spot_turn_speed = 4;
 const float leg_move_speed = 8;
@@ -69,6 +79,22 @@ const float turn_y1 = y_start + y_step / 2;
 const float turn_x0 = turn_x1 - temp_b * cos(temp_alpha);
 const float turn_y0 = temp_b * sin(temp_alpha) - turn_y1 - length_side;
 /* ---------------------------------------------------------------------------*/
+boolean Demo_mode=true;
+String lastComm="";
+int ledPulse =0;
+
+int FRFoot = 0;
+int FRElbow = 0;
+int FRShdr=0; 
+int FLFoot = 0;
+int FLElbow = 0;
+int FLShdr=0; 
+int RRFoot = 0;
+int RRElbow = 0;
+int RRShdr=0; 
+int RLFoot = 0;
+int RLElbow = 0; 
+int RLShdr=0;
 
 /*
   - setup function
@@ -76,8 +102,17 @@ const float turn_y0 = temp_b * sin(temp_alpha) - turn_y1 - length_side;
 void setup()
 {
   //start serial for debug
+  
   Serial.begin(115200);
   Serial.println("Robot starts initialization");
+  
+  pinMode(LED_BUILTIN, OUTPUT);
+  pwm.begin();
+  pwm.setPWMFreq(60);  // Analog servos run at ~60 Hz updates
+  SCmd.addCommand("w", action_cmd);
+
+  SCmd.setDefaultHandler(unrecognized);
+
   //initialize default parameter
   set_site(0, x_default - x_offset, y_start + y_step, z_boot);
   set_site(1, x_default - x_offset, y_start + y_step, z_boot);
@@ -95,67 +130,288 @@ void setup()
   FlexiTimer2::start();
   Serial.println("Servo service started");
   //initialize servos
-  servo_attach();
+ // servo_attach();
   Serial.println("Servos initialized");
   Serial.println("Robot initialization Complete");
+  sit();
+  b_init();
 }
 
 
-void servo_attach(void)
-{
-  for (int i = 0; i < 4; i++)
-  {
-    for (int j = 0; j < 3; j++)
-    {
-      servo[i][j].attach(servo_pin[i][j]);
-      delay(100);
-    }
-  }
-}
-
-void servo_detach(void)
-{
-  for (int i = 0; i < 4; i++)
-  {
-    for (int j = 0; j < 3; j++)
-    {
-      servo[i][j].detach();
-      delay(100);
-    }
-  }
+// you can use this function if you'd like to set the pulse length in seconds
+// e.g. setServoPulse(0, 0.001) is a ~1 millisecond pulse width. its not precise!
+void setServoPulse(uint8_t n, double pulse) {
+  double pulselength;
+  pulselength = 1000000;   // 1,000,000 us per second
+  pulselength /= 60;   // 60 Hz
+  pulselength /= 4096;  // 12 bits of resolution
+  pulse *= 1000000;  // convert to us
+  pulse /= pulselength;
+  pwm.setPWM(n, 0, pulse);
 }
 /*
   - loop function
    ---------------------------------------------------------------------------*/
 void loop()
 {
-  Serial.println("Stand");
-  stand();
-  delay(2000);
-  Serial.println("Step forward");
-  step_forward(5);
-  delay(2000);
-  Serial.println("Step back");
-  step_back(5);
-  delay(2000);
-  Serial.println("Turn left");
-  turn_left(5);
-  delay(2000);
-  Serial.println("Turn right");
-  turn_right(5);
-  delay(2000);
-  Serial.println("Hand wave");
-  hand_wave(3);
-  delay(2000);
-  Serial.println("Hand shake");
-  hand_shake(3);
-  delay(2000);  
-  Serial.println("Body dance");
-  body_dance(10);
-  delay(2000);    
-  Serial.println("Sit");
-  sit();
-  delay(5000);
+  //-----------led blink status
+    if (ledPulse <= 500){
+      digitalWrite(LED_BUILTIN, LOW); 
+    }
+    if (ledPulse > 1000){
+      digitalWrite(LED_BUILTIN, HIGH); 
+    }
+    if (ledPulse >= 1500){
+      ledPulse = 0;
+    }
+    ledPulse++;
+  //-------------------
+    
+    SCmd.readSerial();
+    if (lastComm=="FWD"){
+      step_forward(1);
+    }
+    if (lastComm=="BWD"){
+      step_back(1);
+    }
+    if (lastComm=="LFT"){
+      turn_left(1);
+    }
+    if (lastComm=="RGT"){
+      turn_right(1);
+    }
+    Serial.println(lastComm);
+    // turn_right(1); //test
+}
+
+// w 0 2: body init
+// w 0 1: stand
+// w 0 0: sit
+// w 1 x: forward x step
+// w 2 x: back x step
+// w 3 x: right turn x step
+// w 4 x: left turn x step
+// w 5 x: hand shake x times
+// w 6 x: hand wave x times
+// w 7 : dance
+// w 8 x: head up x times
+// w 9 x: head down x times
+// w 10 x: body right x times
+// w 11 x: body left x times
+// w 12: Body init pose
+// w 13: body up
+// w 14: body down
+// w 15: reset pos
+// w 16: body twist right
+// w 17: body twist left
+
+#define W_STAND_SIT    0
+#define W_FORWARD      1
+#define W_BACKWARD     2
+#define W_LEFT         3
+#define W_RIGHT        4
+#define W_SHAKE        5
+#define W_WAVE         6
+#define W_DANCE        7
+#define W_HEAD_UP      8
+#define W_HEAD_DOWN    9
+#define W_B_RIGHT      10
+#define W_B_LEFT       11
+#define W_B_INIT       12
+#define W_HIGHER       13
+#define W_LOWER        14
+#define W_SET          15
+#define W_TW_R         16
+#define W_TW_L         17
+
+void action_cmd(void)
+{
+  char *arg;
+  int action_mode, n_step;
+  Serial.println("Action:");
+  arg = SCmd.next();
+  action_mode = atoi(arg);
+  arg = SCmd.next();
+  n_step = atoi(arg);
+  Demo_mode=false;
+
+  switch (action_mode)
+  {
+    case W_FORWARD:
+      Serial.println("Step forward");
+      lastComm="FWD";
+      if (!is_stand())
+        stand();
+        step_forward(n_step);
+      break;
+      
+    case W_BACKWARD:
+      Serial.println("Step back");
+      lastComm="BWD";
+      if (!is_stand())
+        stand();
+      step_back(n_step);
+      break;
+      
+    case W_LEFT:
+      Serial.println("Turn left");
+      lastComm="LFT";
+      if (!is_stand())
+        stand();
+      turn_left(n_step);
+      break;
+      
+    case W_RIGHT:
+      Serial.println("Turn right");
+      lastComm="RGT";
+      if (!is_stand())
+        stand();
+      turn_right(n_step);
+      break;
+      
+    case W_STAND_SIT:
+      Serial.println("1:up,0:dn");
+      lastComm="";
+      if (n_step)
+        stand();
+      else
+        sit();
+      break;
+      
+    case W_SHAKE:
+      Serial.println("Hand shake");
+      lastComm="";
+      hand_shake(n_step);
+      break;
+
+    case W_WAVE:
+      Serial.println("Hand wave");
+      lastComm="";
+      hand_wave(n_step);
+      break;
+
+    case W_DANCE:
+      Serial.println("Lets rock baby");
+      lastComm="";
+      //body_dance(n_step);
+      body_dance(10);
+      break;
+
+    case W_SET:
+      Serial.println("Higher");
+      FLElbow =0;FRElbow =0;
+      RLElbow =0;RRElbow =0;
+      FLFoot =0;FRFoot =0;
+      RLFoot =0;RRFoot =0;
+      FLShdr=0; FRShdr=0;
+      RLShdr=0;RRShdr=0;
+      stand();
+      break;  
+
+    case W_HIGHER:
+      Serial.println("Higher");
+      FLElbow -= 4;FRElbow -= 4;
+      RLElbow -= 4;RRElbow -= 4;
+      FLFoot += 4;FRFoot += 4;
+      RLFoot += 4;RRFoot += 4;
+      stand();
+      break;
+
+    case W_LOWER:
+      Serial.println("Lower");
+      FLElbow += 4;FRElbow += 4;
+      RLElbow += 4;RRElbow += 4;
+      FLFoot -= 4;FRFoot -= 4;
+      RLFoot -= 4;RRFoot -= 4;
+      stand();
+      break;
+
+    case W_HEAD_UP:
+      Serial.println("Head up");
+      FLElbow -= 4;FRElbow -= 4;
+      RLElbow += 4;RRElbow += 4;
+      FLFoot += 4;FRFoot += 4;
+      RLFoot -= 4;RRFoot -= 4;
+      stand();
+      break;
+
+    case W_HEAD_DOWN:
+      Serial.println("Head down");
+      FLElbow += 4;FRElbow += 4;
+      RLElbow -= 4;RRElbow -= 4;
+      FLFoot -= 4;FRFoot -= 4;
+      RLFoot += 4;RRFoot += 4;
+      stand();
+      break;
+
+    case W_B_RIGHT:
+      Serial.println("body right");
+      if (!is_stand()) stand();
+      FLElbow -= 4;FRElbow += 4;
+      RLElbow -= 4;RRElbow += 4;
+      FLFoot += 4;FRFoot -= 4;
+      RLFoot += 4;RRFoot -= 4;
+      stand();
+      break; 
+
+    case W_B_LEFT:
+      Serial.println("body left");
+      if (!is_stand()) stand();
+      FLElbow += 4;FRElbow -= 4;
+      RLElbow += 4;RRElbow -= 4;
+      FLFoot -= 4;FRFoot += 4;
+      RLFoot -= 4;RRFoot += 4;
+      stand();
+      break; 
+
+    case W_B_INIT:
+      Serial.println("Body init");
+      lastComm="";
+      sit();
+      b_init();
+      FLElbow =0;FRElbow =0;
+      RLElbow =0;RRElbow =0;
+      FLFoot =0;FRFoot =0;
+      RLFoot =0;RRFoot =0;
+      FLShdr=0; FRShdr=0;
+      RLShdr=0;RRShdr=0;
+      stand();
+      break;
+
+    case W_TW_R:
+      Serial.println("Body twist right");
+      FLShdr-= 4; FRShdr+= 4;
+      RLShdr+= 4;RRShdr-= 4;
+      stand();
+      break;
+      
+    case W_TW_L:
+      Serial.println("Body twist left");
+      FLShdr+= 4; FRShdr-= 4;
+      RLShdr-= 4;RRShdr+= 4;
+      stand();
+      break;
+
+    default:
+      Serial.println("Error");
+      break;
+  }
+}
+
+// This gets set as the default handler, and gets called when no other command matches.
+void unrecognized(const char *command) {
+  Serial.println("What?");
+}
+
+/*
+  - is_stand
+   ---------------------------------------------------------------------------*/
+bool is_stand(void)
+{
+  if (site_now[0][2] == z_default)
+    return true;
+  else
+    return false;
 }
 
 /*
@@ -186,6 +442,20 @@ void stand(void)
   wait_all_reach();
 }
 
+
+/*
+  - Body init
+  - blocking function
+   ---------------------------------------------------------------------------*/
+void b_init(void)
+{
+  //stand();
+  set_site(0, x_default, y_default, z_default);
+  set_site(1, x_default, y_default, z_default);
+  set_site(2, x_default, y_default, z_default);
+  set_site(3, x_default, y_default, z_default);
+  wait_all_reach();
+}
 
 /*
   - spot turn to left
@@ -384,7 +654,7 @@ void step_forward(unsigned int step)
     }
     else
     {
-      //leg 0&3 move
+//      leg 0&3 move
       set_site(0, x_default + x_offset, y_start, z_up);
       wait_all_reach();
       set_site(0, x_default + x_offset, y_start + 2 * y_step, z_up);
@@ -591,6 +861,7 @@ void hand_shake(int i)
   }
 }
 
+
 void head_up(int i)
 {
   set_site(0, KEEP, KEEP, site_now[0][2] - i);
@@ -622,7 +893,7 @@ void body_dance(int i)
   set_site(2, x_default, y_default, KEEP);
   set_site(3, x_default, y_default, KEEP);
   wait_all_reach();
-  //stand();
+  stand();
   set_site(0, x_default, y_default, z_default - 20);
   set_site(1, x_default, y_default, z_default - 20);
   set_site(2, x_default, y_default, z_default - 20);
@@ -649,8 +920,8 @@ void body_dance(int i)
   }
   move_speed = body_dance_speed;
   head_down(30);
+  b_init();
 }
-
 
 /*
   - microservos service /timer interrupt function/50Hz
@@ -658,7 +929,6 @@ void body_dance(int i)
   - temp_speed[4][3] should be set before set expect site,it make sure the end point
    move in a straight line,and decide move speed.
    ---------------------------------------------------------------------------*/
-#define E_DELTA 0.01
 void servo_service(void)
 {
   sei();
@@ -668,10 +938,10 @@ void servo_service(void)
   {
     for (int j = 0; j < 3; j++)
     {
-      if (abs(site_now[i][j] - site_expect[i][j]) < (abs(temp_speed[i][j])+E_DELTA))
-        site_now[i][j] = site_expect[i][j];
-      else
+      if (abs(site_now[i][j] - site_expect[i][j]) >= abs(temp_speed[i][j]))
         site_now[i][j] += temp_speed[i][j];
+      else
+        site_now[i][j] = site_expect[i][j];
     }
 
     cartesian_to_polar(alpha, beta, gamma, site_now[i][0], site_now[i][1], site_now[i][2]);
@@ -761,32 +1031,33 @@ void cartesian_to_polar(volatile float &alpha, volatile float &beta, volatile fl
    ---------------------------------------------------------------------------*/
 void polar_to_servo(int leg, float alpha, float beta, float gamma)
 {
-  if (leg == 0)
+  if (leg == 0) //Front Right
   {
-    alpha = 90 - alpha;
-    beta = beta;
-    gamma += 90;
+    alpha = 85 - alpha - FRElbow; //elbow (- is up)
+    beta = beta + 40 - FRFoot; //foot (- is up)
+    gamma += 115 - FRShdr;    // shoulder (- is left)
   }
-  else if (leg == 1)
+  else if (leg == 1) //Rear Right
   {
-    alpha += 90;
-    beta = 180 - beta;
-    gamma = 90 - gamma;
+    alpha += 90 + RRElbow; //elbow (+ is up)
+    beta = 115 - beta + RRFoot; //foot (+ is up)
+    gamma = 115 - gamma + RRShdr; // shoulder (+ is left)
   }
-  else if (leg == 2)
+  else if (leg == 2) //Front Left
   {
-    alpha += 90;
-    beta = 180 - beta;
-    gamma = 90 - gamma;
+    alpha += 75 + FLElbow; //elbow (+ is up)
+    beta = 140 - beta + FLFoot; //foot (+ is up)
+    gamma = 115 - gamma + FLShdr;// shoulder (+ is left)
   }
-  else if (leg == 3)
+  else if (leg == 3) // Rear Left
   {
-    alpha = 90 - alpha;
-    beta = beta;
-    gamma += 90;
+    alpha = 90 - alpha - RLElbow; //elbow (- is up)
+    beta = beta + 50 - RLFoot; //foot; (- is up)
+    gamma += 100 - RLShdr;// shoulder (- is left)
   }
-
-  servo[leg][0].write(alpha);
-  servo[leg][1].write(beta);
-  servo[leg][2].write(gamma);
+  int AL = ((850/180)*alpha);if (AL > 580) AL=580;if (AL < 125) AL=125;pwm.setPWM(servo_pin[leg][0],0,AL);
+  int BE = ((850/180)*beta);if (BE > 580) BE=580;if (BE < 125) BE=125;pwm.setPWM(servo_pin[leg][1],0,BE);
+  int GA = ((580/180)*gamma);if (GA > 580) GA=580;if (GA < 125) GA=125;pwm.setPWM(servo_pin[leg][2],0,GA);
 }
+
+

@@ -1,4 +1,5 @@
-/* -----------------------------------------------------------------------------
+/*  ESTE CODIGO FUE CAMBIADO PARA USAR TICKER.h EN VEZ DE FLEXITIMER2.h
+ *  -----------------------------------------------------------------------------
   - Project: Remote control Crawling robot
   - Author:  panerqiang@sunfounder.com
   - Date:  2015/1/27
@@ -24,13 +25,19 @@
 // modified by Regis for spider project, 2015/09/11
 
 /* Includes ------------------------------------------------------------------*/
-#include <Servo.h>    //to define and control servos
-#include <FlexiTimer2.h>//to set a timer to manage all servos
+#include <Adafruit_PWMServoDriver.h>
+//#include <FlexiTimer2.h>//to set a timer to manage all servos
+#include <Ticker.h> // Sustituto a FlexiTimer
+Ticker servoTicker;
+//#include <SerialCommand.h>
+//SerialCommand SCmd;   // The demo SerialCommand object
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 /* Servos --------------------------------------------------------------------*/
 //define 12 servos for 4 legs
-Servo servo[4][3];
+
+//Servo servo[4][3];
 //define servos' ports
-const int servo_pin[4][3] = { {2, 3, 4}, {5, 6, 7}, {8, 9, 10}, {11, 12, 13} };
+const int servo_pin[4][3] = { {0, 1, 2}, {4, 5, 6}, {8, 9, 10}, {12, 13, 14} };
 /* Size of the robot ---------------------------------------------------------*/
 const float length_a = 55;
 const float length_b = 77.5;
@@ -69,6 +76,22 @@ const float turn_y1 = y_start + y_step / 2;
 const float turn_x0 = turn_x1 - temp_b * cos(temp_alpha);
 const float turn_y0 = temp_b * sin(temp_alpha) - turn_y1 - length_side;
 /* ---------------------------------------------------------------------------*/
+boolean Demo_mode=true;
+String lastComm="";
+int ledPulse =0;
+
+int FRFoot = 0;
+int FRElbow = 0;
+int FRShdr=0; 
+int FLFoot = 0;
+int FLElbow = 0;
+int FLShdr=0; 
+int RRFoot = 0;
+int RRElbow = 0;
+int RRShdr=0; 
+int RLFoot = 0;
+int RLElbow = 0; 
+int RLShdr=0;
 
 /*
   - setup function
@@ -78,6 +101,15 @@ void setup()
   //start serial for debug
   Serial.begin(115200);
   Serial.println("Robot starts initialization");
+
+  //Bloque añadido<++++++++++++++++++++++++++++++++++++++++++++++++
+  pinMode(LED_BUILTIN, OUTPUT);
+  //Esto es para el shield de PCA
+  pwm.begin();
+  pwm.setPWMFreq(60);  // Analog servos run at ~60 Hz updates
+  //SCmd.addCommand("w", action_cmd);
+  //SCmd.setDefaultHandler(unrecognized);
+  
   //initialize default parameter
   set_site(0, x_default - x_offset, y_start + y_step, z_boot);
   set_site(1, x_default - x_offset, y_start + y_step, z_boot);
@@ -90,43 +122,36 @@ void setup()
       site_now[i][j] = site_expect[i][j];
     }
   }
-  //start servo service
-  FlexiTimer2::set(20, servo_service);
-  FlexiTimer2::start();
+  
+//start servo service
+//  FlexiTimer2::set(20, servo_service);
+//  FlexiTimer2::start();
+servoTicker.attach_ms(20, servo_service); //Sustituto a FlexiTimer
+
   Serial.println("Servo service started");
   //initialize servos
-  servo_attach();
+  //servo_attach(); //DESCOMENTADO<---------------------
   Serial.println("Servos initialized");
   Serial.println("Robot initialization Complete");
+  sit();
+  b_init();
+} //Fin setup()
+
+// you can use this function if you'd like to set the pulse length in seconds //AÑADIDO<+++++
+// e.g. setServoPulse(0, 0.001) is a ~1 millisecond pulse width. its not precise!
+void setServoPulse(uint8_t n, double pulse) {
+  double pulselength;
+  pulselength = 1000000;   // 1,000,000 us per second
+  pulselength /= 60;   // 60 Hz
+  pulselength /= 4096;  // 12 bits of resolution
+  pulse *= 1000000;  // convert to us
+  pulse /= pulselength;
+  pwm.setPWM(n, 0, pulse);
 }
 
-
-void servo_attach(void)
-{
-  for (int i = 0; i < 4; i++)
-  {
-    for (int j = 0; j < 3; j++)
-    {
-      servo[i][j].attach(servo_pin[i][j]);
-      delay(100);
-    }
-  }
-}
-
-void servo_detach(void)
-{
-  for (int i = 0; i < 4; i++)
-  {
-    for (int j = 0; j < 3; j++)
-    {
-      servo[i][j].detach();
-      delay(100);
-    }
-  }
-}
 /*
   - loop function
-   ---------------------------------------------------------------------------*/
+   ------------------------------------------------------------- --------------*/
 void loop()
 {
   Serial.println("Stand");
@@ -147,7 +172,7 @@ void loop()
   Serial.println("Hand wave");
   hand_wave(3);
   delay(2000);
-  Serial.println("Hand shake");
+  Serial.println("Hand wave");
   hand_shake(3);
   delay(2000);  
   Serial.println("Body dance");
@@ -185,7 +210,19 @@ void stand(void)
   }
   wait_all_reach();
 }
-
+/*
+  - Body init
+  - blocking function
+   ---------------------------------------------------------------------------*/
+void b_init(void)
+{
+  //stand();
+  set_site(0, x_default, y_default, z_default);
+  set_site(1, x_default, y_default, z_default);
+  set_site(2, x_default, y_default, z_default);
+  set_site(3, x_default, y_default, z_default);
+  wait_all_reach();
+}
 
 /*
   - spot turn to left
@@ -761,32 +798,31 @@ void cartesian_to_polar(volatile float &alpha, volatile float &beta, volatile fl
    ---------------------------------------------------------------------------*/
 void polar_to_servo(int leg, float alpha, float beta, float gamma)
 {
-  if (leg == 0)
+  if (leg == 0) //Front Right
   {
-    alpha = 90 - alpha;
-    beta = beta;
-    gamma += 90;
+    alpha = 85 - alpha - FRElbow; //elbow (- is up)
+    beta = beta + 40 - FRFoot; //foot (- is up)
+    gamma += 115 - FRShdr;    // shoulder (- is left)
   }
-  else if (leg == 1)
+  else if (leg == 1) //Rear Right
   {
-    alpha += 90;
-    beta = 180 - beta;
-    gamma = 90 - gamma;
+    alpha += 90 + RRElbow; //elbow (+ is up)
+    beta = 115 - beta + RRFoot; //foot (+ is up)
+    gamma = 115 - gamma + RRShdr; // shoulder (+ is left)
   }
-  else if (leg == 2)
+  else if (leg == 2) //Front Left
   {
-    alpha += 90;
-    beta = 180 - beta;
-    gamma = 90 - gamma;
+    alpha += 75 + FLElbow; //elbow (+ is up)
+    beta = 140 - beta + FLFoot; //foot (+ is up)
+    gamma = 115 - gamma + FLShdr;// shoulder (+ is left)
   }
-  else if (leg == 3)
+  else if (leg == 3) // Rear Left
   {
-    alpha = 90 - alpha;
-    beta = beta;
-    gamma += 90;
+    alpha = 90 - alpha - RLElbow; //elbow (- is up)
+    beta = beta + 50 - RLFoot; //foot; (- is up)
+    gamma += 100 - RLShdr;// shoulder (- is left)
   }
-
-  servo[leg][0].write(alpha);
-  servo[leg][1].write(beta);
-  servo[leg][2].write(gamma);
+  int AL = ((850/180)*alpha);if (AL > 580) AL=580;if (AL < 125) AL=125;pwm.setPWM(servo_pin[leg][0],0,AL);
+  int BE = ((850/180)*beta);if (BE > 580) BE=580;if (BE < 125) BE=125;pwm.setPWM(servo_pin[leg][1],0,BE);
+  int GA = ((580/180)*gamma);if (GA > 580) GA=580;if (GA < 125) GA=125;pwm.setPWM(servo_pin[leg][2],0,GA);
 }
