@@ -1,14 +1,15 @@
-/*  ESTE CODIGO FUE CAMBIADO PARA USAR TICKER.h EN VEZ DE FLEXITIMER2.h
+/*  THIS CODE WAS MODIFIED TO USE TICKER.h INSTEAD OF FLEXITIMER2.h FOR ESP8266
+ *  COMPATIBILITY
+ *   
  *  -----------------------------------------------------------------------------
-  - Project: Remote control Crawling robot
-  - Author:  panerqiang@sunfounder.com
-  - Date:  2015/1/27
+  - Project: Remote control Spider robot with ESP8266
    -----------------------------------------------------------------------------
   - Overview
   - This project was written for the Crawling robot desigened by Sunfounder.
     This version of the robot has 4 legs, and each leg is driven by 3 servos.
-  This robot is driven by a Ardunio Nano Board with an expansion Board.
+  This robot is driven by an ESP8266 NodeMCU V3 Board with an expansion Board.
   We recommend that you view the product documentation before using.
+  
   - Request
   - This project requires some library files, which you can find in the head of
     this file. Make sure you have installed these files.
@@ -20,23 +21,21 @@
     3.measure real sites and set to real_site[4][3], make and run
     4.comment VERIFY, make and run
   The document describes in detail how to operate.
+  
    ---------------------------------------------------------------------------*/
-
+// original code by panerqiang@sunfounder.com, 2015/1/27
 // modified by Regis for spider project, 2015/09/11
+// modificado por Cardansan para spider con ESP8266, 2021/10/16
 
 /* Includes ------------------------------------------------------------------*/
 #include <Adafruit_PWMServoDriver.h>
-//#include <FlexiTimer2.h>//to set a timer to manage all servos
-#include <Ticker.h> // Sustituto a FlexiTimer
+#include <Ticker.h> // Sustituto a FlexiTimer2.h
 Ticker servoTicker;
-//#include <SerialCommand.h>
-//SerialCommand SCmd;   // The demo SerialCommand object
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
+
 /* Servos --------------------------------------------------------------------*/
 //define 12 servos for 4 legs
-
-//Servo servo[4][3];
-//define servos' ports
+//define servos' ports for PWM Servo Driver
 const int servo_pin[4][3] = { {0, 1, 2}, {4, 5, 6}, {8, 9, 10}, {12, 13, 14} };
 /* Size of the robot ---------------------------------------------------------*/
 const float length_a = 55;
@@ -106,9 +105,7 @@ void setup()
   pinMode(LED_BUILTIN, OUTPUT);
   //Esto es para el shield de PCA
   pwm.begin();
-  pwm.setPWMFreq(60);  // Analog servos run at ~60 Hz updates
-  //SCmd.addCommand("w", action_cmd);
-  //SCmd.setDefaultHandler(unrecognized);
+  pwm.setPWMFreq(50);  // Analog servos run at ~60 Hz updates
   
   //initialize default parameter
   set_site(0, x_default - x_offset, y_start + y_step, z_boot);
@@ -123,10 +120,8 @@ void setup()
     }
   }
   
-//start servo service
-//  FlexiTimer2::set(20, servo_service);
-//  FlexiTimer2::start();
-servoTicker.attach_ms(20, servo_service); //Sustituto a FlexiTimer
+  //start servo service
+  servoTicker.attach_ms(20, servo_service); //Sustituto a FlexiTimer
 
   Serial.println("Servo service started");
   //initialize servos
@@ -134,7 +129,10 @@ servoTicker.attach_ms(20, servo_service); //Sustituto a FlexiTimer
   Serial.println("Servos initialized");
   Serial.println("Robot initialization Complete");
   sit();
+  Serial.println("sit");
   b_init();
+  Serial.println("b_init");
+  Serial.println("Fin setup!");
 } //Fin setup()
 
 // you can use this function if you'd like to set the pulse length in seconds //AÑADIDO<+++++
@@ -753,12 +751,12 @@ void set_site(int leg, float x, float y, float z)
   - blocking function
    ---------------------------------------------------------------------------*/
 void wait_reach(int leg)
-{
-  while (1)
-    if (site_now[leg][0] == site_expect[leg][0])
-      if (site_now[leg][1] == site_expect[leg][1])
-        if (site_now[leg][2] == site_expect[leg][2])
-          break;
+{ //Aquí se anda trabando si lo descomento
+//  while (1)
+//    if (site_now[leg][0] == site_expect[leg][0])
+//      if (site_now[leg][1] == site_expect[leg][1])
+//        if (site_now[leg][2] == site_expect[leg][2])
+//          break;
 }
 
 /*
